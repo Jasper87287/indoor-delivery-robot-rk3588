@@ -1,1 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <title>配送机器人控制台</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 20px;
+            background: #f5f7fa;
+        }
+        h1 { color: #2c3e50; }
+        .container { display: flex; flex-wrap: wrap; gap: 20px; }
+        .canvas-box {
+            background: white;
+            padding: 10px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        .control-box {
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        button {
+            padding: 12px 20px;
+            border: none;
+            border-radius: 6px;
+            font-size: 16px;
+            cursor: pointer;
+            transition: 0.2s;
+        }
+        .arrow-btn { background: #3498db; color: white; }
+        .arrow-btn:hover { background: #2980b9; }
+        .stop-btn { background: #e74c3c; color: white; font-weight: bold; margin-top: 10px; }
+        .stop-btn:hover { background: #c0392b; }
+        .row { display: flex; gap: 5px; justify-content: center; }
+        #status {
+            background: white;
+            padding: 15px;
+            border-radius: 10px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            min-width: 200px;
+        }
+        #status p { margin: 5px 0; font-size: 14px; }
+    </style>
+</head>
+<body>
+    <h1>🤖 室内配送机器人控制台</h1>
 
+    <div class="container">
+        <!-- Canvas 画布区 -->
+        <div class="canvas-box">
+            <canvas id="mapCanvas" width="600" height="600" style="border:1px solid #ccc;"></canvas>
+            <p style="text-align:center; margin:5px;">🟢 实时轨迹（单位：米）</p>
+        </div>
+
+        <!-- 控制按钮区 -->
+        <div class="control-box">
+            <div class="row">
+                <button class="arrow-btn" onclick="sendVel(0.2, 0, 0)">⬆️ 前进</button>
+            </div>
+            <div class="row">
+                <button class="arrow-btn" onclick="sendVel(0, 0.2, 0)">⬅️ 左移</button>
+                <button class="arrow-btn" onclick="sendVel(0, -0.2, 0)">➡️ 右移</button>
+            </div>
+            <div class="row">
+                <button class="arrow-btn" onclick="sendVel(-0.2, 0, 0)">⬇️ 后退</button>
+            </div>
+            <div class="row">
+                <button class="arrow-btn" onclick="sendVel(0, 0, 0.5)">↺ 左转</button>
+                <button class="arrow-btn" onclick="sendVel(0, 0, -0.5)">↻ 右转</button>
+            </div>
+            <button class="stop-btn" onclick="stop()">🛑 急停</button>
+        </div>
+
+        <!-- 状态显示区 -->
+        <div id="status">
+            <h3>📍 实时状态</h3>
+            <p>X: <span id="x">0.00</span> m</p>
+            <p>Y: <span id="y">0.00</span> m</p>
+            <p>θ: <span id="theta">0.00</span> rad</p>
+            <p>Vx: <span id="vx">0.00</span> m/s</p>
+            <p>Vy: <span id="vy">0.00</span> m/s</p>
+            <p>ω: <span id="omega">0.00</span> rad/s</p>
+        </div>
+    </div>
+
+    <script>
+        var socket = io();
+
+        // ---------- Canvas 轨迹绘制 ----------
+        const canvas = document.getElementById('mapCanvas');
+        const ctx = canvas.getContext('2d');
+        const w = canvas.width;
+        const h = canvas.height;
+
+        // 坐标映射参数：将世界坐标(米)映射到像素
+        // 画布原点设在中心，方便左右上下对称
+        const originX = w / 2;   // 像素原点 X
+        const originY = h / 2;   // 像素原点 Y
+        const scale = 100;       // 1米 = 100像素（可根据需要调整，比如50、200）
+        const maxTrailPoints = 500; // 最多保留的点数
+
+        let pathPoints = [];      // 存储历史轨迹点（世界坐标）
+
+        function worldToCanvas(wx, wy) {
+            // 世界坐标 X 向右，Y 向前（向上），对应画布 X 向右，Y 向下
+            // 所以世界 Y 增加 -> 画布 Y 减小
+            return {
+                cx: originX + wx * scale,
+                cy: originY - wy * scale   // y 轴反转
+            };
+        }
+
+        function drawGrid() {
+            // 画网格背景，范围从 -3m 到 +3m（根据 scale 自动计算）
+            ctx.clearRect(0, 0, w, h);
+            ctx.strokeStyle = "#e0e0e0";
+            ctx.lineWidth = 0.5;
+            // 竖线
+            for (let i = -3 * scale; i <= 3 * scale; i += scale) {
+                let x = originX + i;
+                ctx.beginPath();
+                ctx.moveTo(x, 0);
+                ctx.lineTo(x, h);
+                ctx.stroke();
+            }
+            // 横线
+            for (let j = -3 * scale; j <= 3 * scale; j += scale) {
+                let y = originY + j;  // 注意画布 Y 向下为正，所以 j 为正时在下方
+                ctx.beginPath();
+                ctx.moveTo(0, y);
+                ctx.lineTo(w, y);
+                ctx.stroke();
+            }
+            // 坐标轴
+            ctx.strokeStyle = "#888";
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(originX, 0);
+            ctx.lineTo(originX, h);
+            ctx.stroke();
+            ctx.beginPath();
+            ctx.moveTo(0, originY);
+            ctx.lineTo(w, originY);
+            ctx.stroke();
+        }
+
+        function drawTrail() {
+            if (pathPoints.length < 2) return;
+            ctx.beginPath();
+            for (let i = 0; i < pathPoints.length; i++) {
+                let { cx, cy } = worldToCanvas(pathPoints[i].x, pathPoints[i].y);
+                if (i === 0) ctx.moveTo(cx, cy);
+                else ctx.lineTo(cx, cy);
+            }
+            ctx.strokeStyle = "#2ecc71";
+            ctx.lineWidth = 3;
+            ctx.lineCap = "round";
+            ctx.lineJoin = "round";
+            ctx.stroke();
+        }
+
+        function drawRobot(x, y, theta) {
+            let { cx, cy } = worldToCanvas(x, y);
+            // 画小车：一个圆形 + 方向线
+            ctx.beginPath();
+            ctx.arc(cx, cy, 8, 0, 2 * Math.PI);
+            ctx.fillStyle = "#e74c3c";
+            ctx.fill();
+            ctx.strokeStyle = "#c0392b";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+
+            // 方向线（小车朝向），从中心向外延伸 15 像素
+            let dirX = cx + Math.cos(theta) * 15;
+            let dirY = cy - Math.sin(theta) * 15; // 注意画布 y 轴反转！
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(dirX, dirY);
+            ctx.strokeStyle = "#333";
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+
+        function drawMap(newPoint) {
+            // 添加新点到轨迹
+            pathPoints.push(newPoint);
+            if (pathPoints.length > maxTrailPoints) {
+                pathPoints.shift();
+            }
+            // 绘制
+            drawGrid();
+            drawTrail();
+            if (pathPoints.length > 0) {
+                let last = pathPoints[pathPoints.length - 1];
+                drawRobot(last.x, last.y, last.theta);
+            }
+        }
+
+        // 初始绘制空网格
+        drawGrid();
+
+        // ---------- WebSocket 控制函数 ----------
+        function sendVel(vx, vy, omega) {
+            socket.emit('set_velocity', {vx: vx, vy: vy, omega: omega});
+        }
+
+        function stop() {
+            socket.emit('emergency_stop');
+        }
+
+        // ---------- 定时获取状态并更新画面 ----------
+        function fetchStatusAndDraw() {
+            fetch('/get_status')
+                .then(response => response.json())
+                .then(data => {
+                    // 更新文字状态
+                    document.getElementById('x').innerText = data.x.toFixed(3);
+                    document.getElementById('y').innerText = data.y.toFixed(3);
+                    document.getElementById('theta').innerText = data.theta.toFixed(2);
+                    document.getElementById('vx').innerText = data.vx.toFixed(3);
+                    document.getElementById('vy').innerText = data.vy.toFixed(3);
+                    document.getElementById('omega').innerText = data.omega.toFixed(3);
+
+                    // 用最新位姿更新画布
+                    drawMap({ x: data.x, y: data.y, theta: data.theta });
+                })
+                .catch(err => console.error("获取状态失败:", err));
+        }
+
+        // 每 200ms 刷新一次状态和轨迹
+        setInterval(fetchStatusAndDraw, 200);
+    </script>
+</body>
+</html>
