@@ -2,52 +2,165 @@
 <html lang="zh">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>配送机器人控制台</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.5.4/socket.io.min.js"></script>
     <style>
+        * { box-sizing: border-box; }
         body {
             font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            margin: 20px;
+            margin: 0;
+            padding: 10px;
             background: #f5f7fa;
+            min-height: 100vh;
         }
-        h1 { color: #2c3e50; }
-        .container { display: flex; flex-wrap: wrap; gap: 20px; }
+        h1 {
+            color: #2c3e50;
+            text-align: center;
+            font-size: 1.5em;
+            margin: 15px 0;
+        }
+        .container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+        }
         .canvas-box {
             background: white;
             padding: 10px;
             border-radius: 10px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            max-width: 100%;
+        }
+        #mapCanvas {
+            width: 100%;
+            max-width: 600px;
+            height: auto;
+            border: 1px solid #ccc;
+            border-radius: 8px;
         }
         .control-box {
             background: white;
-            padding: 20px;
+            padding: 15px;
             border-radius: 10px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
             display: flex;
             flex-direction: column;
-            gap: 10px;
+            gap: 8px;
+            width: 100%;
+            max-width: 280px;
         }
         button {
-            padding: 12px 20px;
+            padding: 15px 20px;
             border: none;
-            border-radius: 6px;
-            font-size: 16px;
+            border-radius: 8px;
+            font-size: 18px;
             cursor: pointer;
             transition: 0.2s;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
         }
-        .arrow-btn { background: #3498db; color: white; }
-        .arrow-btn:hover { background: #2980b9; }
-        .stop-btn { background: #e74c3c; color: white; font-weight: bold; margin-top: 10px; }
-        .stop-btn:hover { background: #c0392b; }
-        .row { display: flex; gap: 5px; justify-content: center; }
+        .arrow-btn {
+            background: #3498db;
+            color: white;
+            font-size: 20px;
+        }
+        .arrow-btn:hover {
+            background: #2980b9;
+        }
+        .arrow-btn:active {
+            transform: scale(0.95);
+        }
+        .stop-btn {
+            background: #e74c3c;
+            color: white;
+            font-weight: bold;
+            margin-top: 8px;
+            font-size: 16px;
+        }
+        .stop-btn:hover {
+            background: #c0392b;
+        }
+        .stop-btn:active {
+            transform: scale(0.95);
+        }
+        .row {
+            display: flex;
+            gap: 8px;
+            justify-content: center;
+        }
+        .row button {
+            flex: 1;
+            min-width: 50px;
+        }
         #status {
             background: white;
             padding: 15px;
             border-radius: 10px;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            min-width: 200px;
+            width: 100%;
+            max-width: 280px;
         }
-        #status p { margin: 5px 0; font-size: 14px; }
+        #status h3 {
+            margin: 0 0 10px 0;
+            color: #2c3e50;
+            font-size: 1.1em;
+        }
+        #status p {
+            margin: 6px 0;
+            font-size: 14px;
+            display: flex;
+            justify-content: space-between;
+        }
+        #status span {
+            font-weight: 600;
+            color: #3498db;
+        }
+        .keyboard-hint {
+            background: #fff;
+            padding: 10px 15px;
+            border-radius: 8px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            font-size: 13px;
+            color: #666;
+            text-align: center;
+            margin-top: 10px;
+            display: none;
+        }
+        @media (min-width: 768px) {
+            body {
+                margin: 20px;
+                padding: 20px;
+            }
+            h1 {
+                font-size: 2em;
+                text-align: left;
+                margin: 0 0 20px 0;
+            }
+            .container {
+                flex-direction: row;
+                flex-wrap: wrap;
+                align-items: flex-start;
+                justify-content: flex-start;
+                gap: 20px;
+            }
+            .control-box {
+                max-width: 200px;
+            }
+            #status {
+                max-width: 200px;
+            }
+            .keyboard-hint {
+                display: block;
+            }
+        }
+        @media (min-width: 1024px) {
+            .container {
+                max-width: 1200px;
+                margin: 0 auto;
+            }
+        }
     </style>
 </head>
 <body>
@@ -88,6 +201,11 @@
             <p>Vx: <span id="vx">0.00</span> m/s</p>
             <p>Vy: <span id="vy">0.00</span> m/s</p>
             <p>ω: <span id="omega">0.00</span> rad/s</p>
+        </div>
+
+        <!-- 键盘提示 -->
+        <div class="keyboard-hint">
+            ⌨️ 键盘控制：W-前进 | A-左转 | S-后退 | D-右转 | 空格键-急停
         </div>
     </div>
 
@@ -215,6 +333,32 @@
         function stop() {
             socket.emit('emergency_stop');
         }
+
+        // ---------- 键盘 WASD 控制 ----------
+        document.addEventListener('keydown', function(e) {
+            switch(e.key.toLowerCase()) {
+                case 'w':
+                    e.preventDefault();
+                    sendVel(0.2, 0, 0); // 前进
+                    break;
+                case 's':
+                    e.preventDefault();
+                    sendVel(-0.2, 0, 0); // 后退
+                    break;
+                case 'a':
+                    e.preventDefault();
+                    sendVel(0, 0, 0.5); // 左转
+                    break;
+                case 'd':
+                    e.preventDefault();
+                    sendVel(0, 0, -0.5); // 右转
+                    break;
+                case ' ':
+                    e.preventDefault();
+                    stop(); // 急停
+                    break;
+            }
+        });
 
         // ---------- 定时获取状态并更新画面 ----------
         function fetchStatusAndDraw() {
