@@ -2,7 +2,7 @@
 
 ## 1. 简介
 
-本手册适用于室内智能配送机器人，帮助用户完成从硬件组装、系统烧录到运行配送任务的全过程。
+本手册适用于室内智能配送机器人，帮助用户完成从硬件连接、系统启动到运行配送任务的全过程。
 
 ### 1.1 系统组成
 
@@ -10,86 +10,124 @@
 |------|------|
 | 主控平台 | 瑞芯微 RK3588 开发板 |
 | 机器人底盘 | 四轮麦克纳姆轮底盘（含编码电机） |
-| 传感器 | 激光雷达、IMU、深度相机 |
+| 传感器 | 激光雷达、IMU、USB 摄像头 |
 | 电源 | 12V 锂电池组 |
 
 ### 1.2 技术参数
 
 | 参数 | 值 |
 |------|-----|
-| 尺寸 | [待填] mm × [待填] mm |
-| 最大速度 | [待填] m/s |
-| 最大负载 | [待填] kg |
-| 续航时间 | [待填] 分钟 |
-| 定位精度 | ±5 cm |
-| 避障响应时间 | ≤0.5 s |
+| 尺寸 | 300×260×120 mm |
+| 最大速度 | 0.5 m/s |
+| 最大负载 | 2 kg |
+| 续航时间 | 约 60 分钟 |
+| 定位精度 | ±5 cm（目标） |
 
----
+## 2. 硬件连接
 
-## 2. 硬件组装
+### 2.1 串口调试连接
 
-### 2.1 组装步骤
+| USB 转 TTL 模块 | 小车拓展板（40Pin） |
+|----------------|---------------------|
+| TX | 引脚 11（RTT RX） |
+| RX | 引脚 15（RTT TX） |
+| GND | 引脚 9（GND） |
 
-1. **底盘组装**
-   - 将电机安装到底盘车架，用螺丝固定
-   - 安装麦克纳姆轮（注意：左旋轮和右旋轮位置正确）
-   - 安装电池仓
+> 波特率：1500000，8N1
 
-2. **上层安装**
-   - 将 RK3588 开发板固定在底盘上层亚克力板
-   - 安装激光雷达（建议放在车顶中央）
-   - 安装 IMU 模块（注意方向与车身一致）
+### 2.2 电源连接
 
-3. **电路连接**
+- 电池 12V 输出接电机驱动板电源输入
+- 驱动板 5V 输出接 RK3588 Type-C 供电口（或通过降压模块）
 
-| 设备 | 连接至 | 接口类型 |
-|------|--------|----------|
-| 电机驱动板 | RK3588 GPIO | PWM / 编码器接口 |
-| 激光雷达 | RK3588 USB | USB |
-| IMU | RK3588 I2C | SDA/SCL |
-| 深度相机 | RK3588 USB | USB |
+## 3. 软件启动流程
 
-> 详细引脚定义见 [`hardware_connection.md`](hardware_connection.md)
+### 3.1 小车端启动
 
----
+1. **SSH 登录 Linux**（电脑连接小车热点或同一路由器）：
+   ```bash
+   ssh rock@<小车IP>
+密码：rock
 
-## 3. 软件安装
+启动 micro-ROS agent：
 
-### 3.1 硬件要求
-
-| 项目 | 最低配置 |
-|------|----------|
-| RK3588 开发板 | 8GB RAM + 64GB 存储 |
-| 电脑（用于烧录） | Windows 10 / Ubuntu 20.04 |
-| 串口调试模块 | USB 转 TTL（如 CH340） |
-
-### 3.2 系统烧录
-
-1. **获取镜像**
-   - 从竞赛 QQ 群（838028162）下载虚拟化混合部署镜像文件
-
-2. **烧录到开发板**
-   - 参考 [`system_architecture.md`](system_architecture.md) 中的烧录步骤
-
-3. **验证启动**
-   - 上电后，通过串口调试工具查看日志
-   - Linux 侧：SSH 登录，IP 地址 [待填]
-   - RT-Thread 侧：串口打印 `msh />` 提示符
-
-### 3.3 依赖安装
-
-**Linux 侧**：
-
-```bash
-# 更新软件源
-sudo apt update
-
-# 安装 Python 依赖
-pip3 install pyserial flask flask-socketio
-
-# 安装 ROS（推荐 Noetic）
-sudo apt install ros-noetic-desktop-full
-
-# 安装 OpenCV
-pip3 install opencv-python
 ```
+cd ~/Desktop/rock_ws/microros_ws
+source install/setup.bash
+ros2 run micro_ros_agent micro_ros_agent udp4 --port 8888
+```
+保持终端运行。
+
+通过串口进入 RT-Thread（使用 MobaXterm，波特率 1500000）：
+
+连接后按回车，出现 msh />
+
+执行：
+
+```
+microros_chassis udp 10.10.10.31 8888
+```
+（等待 Connect successful!）
+
+再执行：
+
+```
+chassis_car_app
+```
+（可选）启动假里程计（如果编码器未修复）：
+
+```
+python3 ~/robot_scripts/fake_odom.py
+```
+3.2 上位机启动（开发电脑）
+安装依赖：
+
+```
+pip install flask flask-socketio eventlet
+```
+启动 Web 界面：
+
+```
+cd robot_web
+python app.py
+浏览器访问 http://localhost:5000
+```
+
+## 4. 操作说明
+### 4.1 Web 界面功能
+|控件	|功能|
+|------|------|
+|地图区域	|显示小车位置（蓝色圆点）|
+|当前位置|	显示 x, y, θ|
+|目标点输入框	|输入目标坐标（米）|
+|导航按钮	|发送目标点，小车自动导航|
+|急停按钮|	立即停止所有运动|
+
+### 4.2 手动控制（SSH 终端）
+# 前进 0.2 m/s
+ros2 topic pub /cmd_vel geometry_msgs/Twist "{linear: {x: 0.2}}" --once
+
+# 停止
+ros2 topic pub /cmd_vel geometry_msgs/Twist "{linear: {x: 0.0}}" --once
+## 5. 常见问题
+|问题|	解决方法|
+|------|------|
+|无法 SSH 登录|	检查小车 IP 是否正确，网络是否通畅|
+|microros_chassis 连接失败|	尝试 IP 10.10.10.30 或 10.10.10.1；用 ifconfig 查看 vnet0 IP|
+|小车不响应指令	|确认 chassis_car_app 已运行，agent 终端无报错|
+|Web 界面无法连接 rosbridge	|检查小车 rosbridge 是否运行：ros2 run rosbridge_server rosbridge_websocket_launch.xml|
+
+## 6. 维护
+电池：每次使用后充满电存放
+
+麦克纳姆轮：定期清理小轮中的杂物
+
+激光雷达：用软布擦拭光学窗口
+
+## 7. 获取帮助
+竞赛 QQ 群：838028162
+
+GitHub 仓库：https://github.com/Jasper87287/indoor-delivery-robot-rk3588
+
+文档维护人：赵文杰
+最后更新：2026年5月
